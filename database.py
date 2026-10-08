@@ -124,8 +124,8 @@ def reset_school_password(admin_email: str, new_password: str):
 
 # --- STUDENT & PAYMENT FUNCTIONS ---
 
-def register_new_student(student_name: str, student_class: str, parent_phone: str, parent_email: str, school_id: str):
-    """Generates a Paystack Virtual Account and assigns the student to a specific school."""
+def register_new_student(student_name: str, student_class: str, parent_phone: str, parent_email: str, school_id: str, expected_fee: float = 0.0):
+    """Generates a Paystack Virtual Account and assigns the student to a specific school with expected fee tracking."""
     account_info = create_virtual_account(student_name, parent_email, parent_phone)
 
     if not account_info:
@@ -138,7 +138,8 @@ def register_new_student(student_name: str, student_class: str, parent_phone: st
         "parent_email": parent_email,
         "account_number": account_info["account_number"],
         "bank_name": account_info["bank_name"],
-        "school_id": school_id
+        "school_id": school_id,
+        "expected_fee": expected_fee
     }
 
     try:

@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import urllib.parse
 from database import (
     supabase,
     login_school,
@@ -179,56 +180,99 @@ with tab1:
 
     st.divider()
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.subheader("📋 Real-time Fee Transactions")
-        if not df_payments.empty and not df_students.empty:
-            df_merged = df_payments.merge(df_students[["id", "student_name"]], left_on="student_id", right_on="id")
-            display_df = df_merged[["student_name", "amount_paid", "transaction_reference"]]
-            display_df.columns = ["Student", "Amount (₦)", "Reference"]
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No payment transactions recorded yet.")
+    # Render transactions on top
+    st.subheader("📋 Real-time Fee Transactions")
+    if not df_payments.empty and not df_students.empty:
+        df_merged = df_payments.merge(df_students[["id", "student_name"]], left_on="student_id", right_on="id")
+        display_df = df_merged[["student_name", "amount_paid", "transaction_reference"]]
+        display_df.columns = ["Student", "Amount (₦)", "Reference"]
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No payment transactions recorded yet.")
 
-    with col_b:
-        st.subheader("🎓 Registered Virtual Accounts")
-        if not df_students.empty:
-            dva_df = df_students[["student_name", "student_class", "account_number", "bank_name"]].copy()
-            dva_df["account_number"] = dva_df["account_number"].astype(str)
-            dva_df.columns = ["Name", "Class", "Virtual Account", "Bank"]
-            st.dataframe(dva_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No students registered yet.")
+    st.divider()
+
+    # Render dynamic balances and WhatsApp link below transactions
+    st.subheader("🎓 Student Balances & Account Sharing")
+    
+    # Fetch all students for this school
+    students_res = supabase.table("students").select("*").eq("school_id", st.session_state.school_id).execute()
+    students = students_res.data
+    
+    if students:
+        for student in students:
+            # Calculate Total Paid from the payments table based on student_id
+            payments_res = supabase.table("payments").select("amount_paid").eq("student_id", student["id"]).execute()
+            payments = payments_res.data
+            total_paid = sum(p["amount_paid"] for p in payments) if payments else 0
+            
+            expected = student.get("expected_fee") or 0
+            balance = expected - total_paid
+            parent_phone = student.get("parent_phone") or ""
+    
+            # Create visual columns for each student row
+            col_s1, col_s2, col_s3, col_s4 = st.columns([2, 1, 1, 1])
+            
+            with col_s1:
+                st.markdown(f"**{student['student_name']}** ({student['student_class']})<br>🏦 {student['account_number']} ({student['bank_name']})", unsafe_allow_html=True)
+            with col_s2:
+                st.metric("Total Paid", f"₦{total_paid:,.2f}")
+            with col_s3:
+                # If balance is 0 or less, they are fully paid
+                if balance <= 0 and expected > 0:
+                    st.success("Fully Paid")
+                elif expected == 0:
+                    st.info("No fee set")
+                else:
+                    st.error(f"Owes: ₦{balance:,.2f}")
+            with col_s4:
+                # Generate the WhatsApp share link
+                if parent_phone:
+                    # Format phone to standard WhatsApp format (change leading 0 to 234)
+                    clean_phone = parent_phone.strip()
+                    if clean_phone.startswith("0"):
+                        clean_phone = "234" + clean_phone[1:]
+                        
+                    msg = f"Dear Parent, please pay {student['student_name']}'s fees into their dedicated account: {student['account_number']} ({student['bank_name']}). Expected: ₦{expected:,.2f}. Outstanding Balance: ₦{balance:,.2f}."
+                    encoded_msg = urllib.parse.quote(msg)
+                    wa_link = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+                    
+                    st.markdown(f"[📲 Share via WhatsApp]({wa_link})")
+                else:
+                    st.caption("No Phone Provided")
+                    
+            st.divider()
+    else:
+        st.info("No students registered yet.")
 
 # --- TAB 2: REGISTER NEW STUDENT ---
 with tab2:
-    st.subheader("➕ Enroll New Student & Generate Dedicated Virtual Account")
-    
-    with st.form("add_student_form"):
-        s_name = st.text_input("Full Student Name")
-        s_class = st.text_input("Class (e.g., JSS 1, SS 2)")
-        p_phone = st.text_input("Parent Phone Number")
-        p_email = st.text_input("Parent Email Address")
+    with st.form("register_student_form"):
+        st.subheader("Register New Student")
+        student_name = st.text_input("Student Full Name")
+        student_class = st.selectbox("Class", ["JSS 1", "JSS 2", "JSS 3", "SS 1", "SS 2", "SS 3"])
+        parent_phone = st.text_input("Parent Phone Number (e.g., 08030000000)")
+        parent_email = st.text_input("Parent Email Address")
+        expected_fee = st.number_input("Expected School Fee (₦)", min_value=0.0, step=1000.0)
         
-        submit_student = st.form_submit_button("Generate Virtual Account", type="primary")
-
-    if submit_student:
-        if not s_name or not s_class or not p_phone or not p_email:
-            st.error("Please complete all student and parent details.")
-        else:
-            with st.spinner("Communicating with Paystack to allocate Dedicated Account..."):
+        submit = st.form_submit_button("Generate Virtual Account")
+        
+        if submit and student_name and expected_fee > 0:
+            with st.spinner("Generating dedicated account..."):
+                # This calls the updated function from your database.py
                 res = register_new_student(
-                    student_name=s_name,
-                    student_class=s_class,
-                    parent_phone=p_phone,
-                    parent_email=p_email,
-                    school_id=st.session_state.school_id
+                    student_name=student_name,
+                    student_class=student_class,
+                    parent_phone=parent_phone,
+                    parent_email=parent_email,
+                    school_id=st.session_state.school_id,
+                    expected_fee=expected_fee
                 )
                 if res:
-                    st.success(f"Virtual Account generated for {s_name}!")
+                    st.success(f"Virtual Account created for {student_name}!")
                     st.rerun()
                 else:
-                    st.error("Failed to generate Virtual Account. Check Paystack credentials.")
+                    st.error("Failed to generate account. Check details and try again.")
 
 # --- TAB 3: SAAS BILLING & LEDGER ---
 with tab3:

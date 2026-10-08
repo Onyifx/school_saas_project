@@ -9,6 +9,7 @@ app = FastAPI(title="School SaaS Webhook Listener")
 def read_root():
     return {"status": "Online", "message": "School SaaS API is running."}
 
+@app.post("/paystack-webhook")
 @app.post("/webhook/paystack")
 async def paystack_webhook(request: Request):
     try:

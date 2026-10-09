@@ -124,8 +124,17 @@ def reset_school_password(admin_email: str, new_password: str):
 
 # --- STUDENT & PAYMENT FUNCTIONS ---
 
-def register_new_student(student_name: str, student_class: str, parent_phone: str, parent_email: str, school_id: str, expected_fee: float = 0.0):
-    """Generates a Paystack Virtual Account and assigns the student to a specific school with expected fee tracking."""
+def register_new_student(
+    student_name: str,
+    student_class: str,
+    parent_phone: str,
+    parent_email: str,
+    school_id: str,
+    expected_fee: float = 0.0,
+    academic_session: str = "2025/2026",
+    term: str = "1st Term"
+):
+    """Generates a Paystack Virtual Account and assigns student to school with session and term scope."""
     account_info = create_virtual_account(student_name, parent_email, parent_phone)
 
     if not account_info:
@@ -139,7 +148,9 @@ def register_new_student(student_name: str, student_class: str, parent_phone: st
         "account_number": account_info["account_number"],
         "bank_name": account_info["bank_name"],
         "school_id": school_id,
-        "expected_fee": expected_fee
+        "expected_fee": expected_fee,
+        "academic_session": academic_session,
+        "term": term
     }
 
     try:
@@ -149,10 +160,16 @@ def register_new_student(student_name: str, student_class: str, parent_phone: st
         print("❌ Supabase Insert Error:", e)
         return None
 
-def record_payment_in_db(account_number: str, amount_paid: float, reference: str):
-    """Records payment and logs the N1,000 SaaS platform reconciliation fee."""
+def record_payment_in_db(
+    account_number: str,
+    amount_paid: float,
+    reference: str,
+    academic_session: str = "2025/2026",
+    term: str = "1st Term"
+):
+    """Records payment with session/term and logs the N1,000 SaaS platform reconciliation fee."""
     try:
-        student_res = supabase.table("students").select("id, school_id, student_name").eq("account_number", account_number).execute()
+        student_res = supabase.table("students").select("id, school_id, student_name, academic_session, term").eq("account_number", account_number).execute()
         
         if not student_res.data:
             return None
@@ -160,12 +177,16 @@ def record_payment_in_db(account_number: str, amount_paid: float, reference: str
         student = student_res.data[0]
         student_id = student["id"]
         school_id = student.get("school_id")
+        pay_session = student.get("academic_session") or academic_session
+        pay_term = student.get("term") or term
 
         # 1. Insert fee payment
         payment_payload = {
             "student_id": student_id,
             "amount_paid": amount_paid,
-            "transaction_reference": reference
+            "transaction_reference": reference,
+            "academic_session": pay_session,
+            "term": pay_term
         }
         payment_res = supabase.table("payments").insert(payment_payload).execute()
 
